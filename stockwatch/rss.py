@@ -1,10 +1,33 @@
 """RSS news feed fetcher + digest formatter for StockWatch."""
 
 import feedparser
+import json
 import os
 from datetime import datetime, timedelta
 from typing import Optional
 from dataclasses import dataclass, field
+from pathlib import Path
+
+# State file for tracking seen news article links
+STATE_DIR = Path.home() / ".local" / "share" / "stockwatch"
+STATE_FILE = STATE_DIR / "news-seen-articles.json"
+
+def _load_seen_links() -> set:
+    """Load previously seen article links from state file."""
+    if not STATE_FILE.exists():
+        return set()
+    try:
+        return set(json.loads(STATE_FILE.read_text()))
+    except Exception:
+        return set()
+
+
+def _save_seen_links(seen: set) -> None:
+    """Save seen article links to state file."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    # Keep only last 10000 links to avoid unbounded growth
+    links = list(seen)[-10000:]
+    STATE_FILE.write_text(json.dumps(links))
 
 
 # Default RSS feeds — major finance news sources
@@ -30,14 +53,21 @@ class NewsItem:
     tickers_mentioned: list[str] = field(default_factory=list)
 
 
-def fetch_feed(url: str, window_hours: int = NEWS_WINDOW_HOURS) -> list[NewsItem]:
-    """Fetch and parse a single RSS feed, returning recent items."""
+def fetch_feed(url: str, window_hours: int = NEWS_WINDOW_HOURS, seen_links: set | None = None) -> tuple:
+    """Fetch and parse a single RSS feed, returning recent items and new links."""
     cutoff = datetime.utcnow() - timedelta(hours=window_hours)
     items: list[NewsItem] = []
+    new_links: list[str] = []
 
     try:
         feed = feedparser.parse(url)
         for entry in feed.entries:
+            link = entry.get("link", "")
+
+            # Skip already-seen articles
+            if seen_links is not None and link and link in seen_links:
+                continue
+
             # Parse published date
             published = None
             if hasattr(entry, "published_parsed") and entry.published_parsed:
@@ -48,6 +78,11 @@ def fetch_feed(url: str, window_hours: int = NEWS_WINDOW_HOURS) -> list[NewsItem
             # Skip old items
             if published and published < cutoff:
                 continue
+
+            # Mark as seen
+            if link and seen_links is not None:
+                seen_links.add(link)
+                new_links.append(link)
 
             # Extract summary / description
             summary = None
@@ -63,7 +98,7 @@ def fetch_feed(url: str, window_hours: int = NEWS_WINDOW_HOURS) -> list[NewsItem
             items.append(
                 NewsItem(
                     title=entry.get("title", "No title"),
-                    link=entry.get("link", ""),
+                    link=link,
                     published=published,
                     summary=summary,
                     source=feed.feed.get("title", url),
@@ -73,28 +108,50 @@ def fetch_feed(url: str, window_hours: int = NEWS_WINDOW_HOURS) -> list[NewsItem
         import logging
         logging.warning(f"Failed to fetch RSS feed {url}: {e}")
 
-    return items
+    return items, new_links
 
 
 def fetch_all_feeds(
     feed_urls: list[str] | None = None,
     window_hours: int = NEWS_WINDOW_HOURS,
-) -> list[NewsItem]:
-    """Fetch multiple RSS feeds in parallel."""
+    clear_state: bool = False,
+) -> tuple[list[NewsItem], int]:
+    """Fetch multiple RSS feeds in parallel, skipping seen articles."""
     import concurrent.futures
 
     urls = feed_urls or DEFAULT_FEEDS
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(urls), 5)) as executor:
-        results = list(executor.map(lambda u: fetch_feed(u, window_hours), urls))
+    seen_links = set() if clear_state else _load_seen_links()
+    all_new_links: list[str] = []
 
-    # Flatten
-    items: list[NewsItem] = []
-    for chunk in results:
-        items.extend(chunk)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(urls), 5)) as executor:
+        futures = {
+            executor.submit(fetch_feed, u, window_hours, seen_links): u
+            for u in urls
+        }
+        results = []
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            items = result[0]
+            new_links = result[1]
+            results.extend(items)
+            all_new_links.extend(new_links)
+
+    # Flatten + deduplicate by link
+    seen_this_run = set()
+    unique_items: list[NewsItem] = []
+    for item in results:
+        if item.link not in seen_this_run:
+            seen_this_run.add(item.link)
+            unique_items.append(item)
 
     # Sort by published date (newest first)
-    items.sort(key=lambda x: x.published or datetime.min, reverse=True)
-    return items
+    unique_items.sort(key=lambda x: x.published or datetime.min, reverse=True)
+
+    # Persist seen links
+    if all_new_links:
+        _save_seen_links(seen_links)
+
+    return unique_items, len(all_new_links)
 
 
 def filter_news_for_tickers(

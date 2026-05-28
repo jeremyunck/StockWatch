@@ -130,7 +130,8 @@ def main():
     if args.news:
         print("Fetching RSS finance news...", file=sys.stderr)
         feed_urls = args.news_feeds.split(",") if args.news_feeds else None
-        all_news = fetch_all_feeds(feed_urls)
+        all_news, new_count = fetch_all_feeds(feed_urls, clear_state=args.clear_state)
+        print(f"Fetched {new_count} new articles.", file=sys.stderr)
         news_by_ticker = filter_news_for_tickers(all_news, tickers)
         print(format_news_digest(news_by_ticker))
         return
