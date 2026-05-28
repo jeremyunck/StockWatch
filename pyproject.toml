@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stockwatch"
+version = "0.1.0"
+description = "Track stock prices and technical indicators from the command line"
+requires-python = ">=3.10"
+dependencies = [
+    "yfinance>=0.2.0",
+    "tomli>=2.0.1",
+]
+
+[project.scripts]
+stockwatch = "stockwatch.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["stockwatch*"]
