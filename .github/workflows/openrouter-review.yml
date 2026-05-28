@@ -1,0 +1,28 @@
+name: OpenRouter PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Review pull request with OpenRouter
+        uses: jeremyunck/openrouter-review@v2
+        with:
+          open-router-api-key: ${{ secrets.OPEN_ROUTER_API_KEY }}
+          model: ${{ vars.OPENROUTER_MODEL || 'deepseek/deepseek-v4-flash' }}
+          strictness: balanced
+          # Optional: add focus areas for code review
+          # focus: |
+          #   security
+          #   performance
+          #   testing
