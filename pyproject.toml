@@ -10,11 +10,15 @@ requires-python = ">=3.10"
 dependencies = [
     "yfinance>=0.2.0",
     "tomli>=2.0.1",
+    "feedparser>=6.0.0",
 ]
 
 [project.optional-dependencies]
 reddit = [
     "praw>=7.2.0",
+]
+news = [
+    "feedparser>=6.0.0",
 ]
 
 [project.scripts]

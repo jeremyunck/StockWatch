@@ -13,6 +13,11 @@ from stockwatch.reddit import (
     summarize_with_llm,
     format_watchlist_summary,
 )
+from stockwatch.rss import (
+    fetch_all_feeds,
+    filter_news_for_tickers,
+    format_news_digest,
+)
 
 try:
     import tomli
@@ -89,6 +94,16 @@ def main():
         default=os.environ.get("OPENROUTER_API_KEY", ""),
         help="OpenRouter API key for LLM sentiment summary",
     )
+    parser.add_argument(
+        "--news", "-n",
+        action="store_true",
+        help="Include RSS finance news digest",
+    )
+    parser.add_argument(
+        "--news-feeds",
+        type=str,
+        help="Comma-separated list of RSS feed URLs (overrides defaults)",
+    )
 
     args = parser.parse_args()
 
@@ -99,6 +114,14 @@ def main():
         return
 
     quotes = get_quotes(tickers)
+
+    if args.news:
+        print("Fetching RSS finance news...", file=sys.stderr)
+        feed_urls = args.news_feeds.split(",") if args.news_feeds else None
+        all_news = fetch_all_feeds(feed_urls)
+        news_by_ticker = filter_news_for_tickers(all_news, tickers)
+        print(format_news_digest(news_by_ticker))
+        return
 
     if args.reddit:
         if not args.openrouter_key:
