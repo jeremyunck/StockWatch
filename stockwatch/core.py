@@ -8,7 +8,7 @@ import json
 import yfinance as yf
 
 # Default tickers to watch
-DEFAULT_TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"]
+DEFAULT_TICKERS = ["NVDA", "AMD", "MU"]
 
 # Technical indicators to compute
 TECHNICAL_INDICATORS = [
@@ -52,6 +52,9 @@ class StockQuote:
     dividend_yield: Optional[float] = None
     fifty_two_week_high: Optional[float] = None
     fifty_two_week_low: Optional[float] = None
+    trend_1d_change_pct: Optional[float] = None
+    trend_1w_change_pct: Optional[float] = None
+    trend_1m_change_pct: Optional[float] = None
     technical: TechnicalIndicators = field(default_factory=TechnicalIndicators)
     fetched_at: str = field(default_factory=lambda: datetime.now().isoformat())
     error: Optional[str] = None
@@ -106,6 +109,14 @@ def compute_indicators(ticker_obj) -> TechnicalIndicators:
         if len(volume) >= 20:
             indicators.volume_avg_20 = round(volume.rolling(20).mean().iloc[-1], 0)
 
+        # Trend: 1d, 1w, 1m change %
+        if len(close) >= 2:
+            quote.trend_1d_change_pct = round(((close.iloc[-1] / close.iloc[-2]) - 1) * 100, 2)
+        if len(close) >= 5:
+            quote.trend_1w_change_pct = round(((close.iloc[-1] / close.iloc[-5]) - 1) * 100, 2)
+        if len(close) >= 20:
+            quote.trend_1m_change_pct = round(((close.iloc[-1] / close.iloc[-20]) - 1) * 100, 2)
+
     except Exception as e:
         # Log the error for debugging, but still return partial indicators
         import logging
@@ -157,6 +168,21 @@ def get_quote(ticker: str) -> StockQuote:
 
         # Technical indicators from historical data
         quote.technical = compute_indicators(stock)
+
+        # Trend: 1d, 1w, 1m change % from historical close data
+        try:
+            hist = stock.history(period="1mo")
+            if not hist.empty:
+                close = hist["Close"]
+                if len(close) >= 2:
+                    quote.trend_1d_change_pct = round(((close.iloc[-1] / close.iloc[-2]) - 1) * 100, 2)
+                if len(close) >= 5:
+                    quote.trend_1w_change_pct = round(((close.iloc[-1] / close.iloc[-5]) - 1) * 100, 2)
+                if len(close) >= 20:
+                    quote.trend_1m_change_pct = round(((close.iloc[-1] / close.iloc[-20]) - 1) * 100, 2)
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to compute trend: {e}")
 
     except Exception as e:
         quote.error = str(e)

@@ -12,6 +12,11 @@ dependencies = [
     "tomli>=2.0.1",
 ]
 
+[project.optional-dependencies]
+reddit = [
+    "praw>=7.2.0",
+]
+
 [project.scripts]
 stockwatch = "stockwatch.cli:main"
 
