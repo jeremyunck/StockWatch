@@ -7,8 +7,8 @@ import json
 
 import yfinance as yf
 
-# Default tickers to watch
-DEFAULT_TICKERS = ["NVDA", "AMD", "MU"]
+# Default tickers (fallback if no config file found)
+DEFAULT_TICKERS: list[str] = []
 
 # Technical indicators to compute
 TECHNICAL_INDICATORS = [
@@ -109,14 +109,6 @@ def compute_indicators(ticker_obj) -> TechnicalIndicators:
         if len(volume) >= 20:
             indicators.volume_avg_20 = round(volume.rolling(20).mean().iloc[-1], 0)
 
-        # Trend: 1d, 1w, 1m change %
-        if len(close) >= 2:
-            quote.trend_1d_change_pct = round(((close.iloc[-1] / close.iloc[-2]) - 1) * 100, 2)
-        if len(close) >= 5:
-            quote.trend_1w_change_pct = round(((close.iloc[-1] / close.iloc[-5]) - 1) * 100, 2)
-        if len(close) >= 20:
-            quote.trend_1m_change_pct = round(((close.iloc[-1] / close.iloc[-20]) - 1) * 100, 2)
-
     except Exception as e:
         # Log the error for debugging, but still return partial indicators
         import logging
@@ -201,9 +193,9 @@ def get_quotes(tickers: list[str]) -> list[StockQuote]:
 def format_table(quotes: list[StockQuote]) -> str:
     """Format quotes as a pretty terminal table."""
     lines = []
-    lines.append("=" * 88)
-    lines.append(f"{'TICKER':>6}  {'PRICE':>8}  {'CHANGE':>8}  {'%CHG':>7}  {'RSI(14)':>7}  {'SMA(20)':>8}  {'SMA(50)':>8}  {'MACD':>8}  {'VOL(20d)':>10}")
-    lines.append("-" * 88)
+    lines.append("=" * 108)
+    lines.append(f"{'TICKER':>6}  {'PRICE':>8}  {'CHANGE':>8}  {'%CHG':>7}  {'TREND(1d/1w/1m)':>22}  {'RSI(14)':>7}  {'SMA(20)':>8}  {'SMA(50)':>8}  {'MACD':>8}  {'VOL(20d)':>10}")
+    lines.append("-" * 108)
 
     for q in quotes:
         if q.error:
@@ -219,7 +211,9 @@ def format_table(quotes: list[StockQuote]) -> str:
         macd_s = f"{q.technical.macd:.4f}" if q.technical.macd is not None else "---"
         vol_s = f"{q.technical.volume_avg_20:,.0f}" if q.technical.volume_avg_20 is not None else "---"
 
-        lines.append(f"{q.ticker:>6}  {price_s:>8}  {change_s:>8}  {pct_s:>7}  {rsi_s:>7}  {sma20_s:>8}  {sma50_s:>8}  {macd_s:>8}  {vol_s:>10}")
+        trend_s = f"{q.trend_1d_change_pct:+.2f}% / {q.trend_1w_change_pct:+.2f}% / {q.trend_1m_change_pct:+.2f}%" if q.trend_1d_change_pct is not None else "--- / --- / ---"
+
+        lines.append(f"{q.ticker:>6}  {price_s:>8}  {change_s:>8}  {pct_s:>7}  {trend_s:>22}  {rsi_s:>7}  {sma20_s:>8}  {sma50_s:>8}  {macd_s:>8}  {vol_s:>10}")
 
     lines.append("=" * 88)
     lines.append(f"Fetched: {quotes[0].fetched_at if quotes else 'N/A'}")
