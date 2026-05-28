@@ -8,7 +8,7 @@ from pathlib import Path
 
 from stockwatch.core import DEFAULT_TICKERS, get_quotes, format_table, format_json
 from stockwatch.reddit import (
-    get_reddit_client,
+    get_reddit_bearer_token,
     fetch_reddit_sentiment,
     summarize_with_llm,
     format_watchlist_summary,
@@ -121,7 +121,6 @@ def main():
     quotes = get_quotes(tickers)
 
     if args.clear_state:
-        import os
         state_file = os.path.join(os.environ.get('HOME', ''), '.local', 'share', 'stockwatch', 'reddit-seen-posts.json')
         if os.path.exists(state_file):
             os.remove(state_file)
