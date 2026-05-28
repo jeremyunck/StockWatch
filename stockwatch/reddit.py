@@ -1,8 +1,11 @@
-"""Reddit sentiment analysis via PRAW + LLM summarization."""
+"""Reddit sentiment analysis via Reddit API v2 (server-side OAuth2) + LLM summarization."""
 
-import praw
 import os
 import json
+import urllib.request
+import urllib.parse
+import urllib.error
+import base64
 import time
 from datetime import datetime, timedelta
 from typing import Optional
@@ -13,8 +16,11 @@ from pathlib import Path
 STATE_DIR = Path.home() / ".local" / "share" / "stockwatch"
 STATE_FILE = STATE_DIR / "reddit-seen-posts.json"
 
+# Subreddits to search
+DEFAULT_SUBREDDITS = ["wallstreetbets", "stocks", "investing", "StockMarket"]
 
-def _load_seen_ids() -> set[str]:
+
+def _load_seen_ids() -> set:
     """Load previously seen Reddit post IDs from state file."""
     if not STATE_FILE.exists():
         return set()
@@ -24,7 +30,7 @@ def _load_seen_ids() -> set[str]:
         return set()
 
 
-def _save_seen_ids(seen: set[str]) -> None:
+def _save_seen_ids(seen: set) -> None:
     """Save seen Reddit post IDs to state file."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     # Keep only last 5000 IDs to avoid unbounded growth
@@ -35,7 +41,7 @@ def _save_seen_ids(seen: set[str]) -> None:
 @dataclass
 class SentimentResult:
     ticker: str
-    reddit_score: Optional[float] = None  # average upvote ratio / sentiment proxy
+    reddit_score: Optional[float] = None  # avg upvote ratio / sentiment proxy
     reddit_mentions: int = 0
     reddit_top_comment: Optional[str] = None
     reddit_sentiment_summary: Optional[str] = None
@@ -43,8 +49,8 @@ class SentimentResult:
     error: Optional[str] = None
 
 
-def get_reddit_client() -> Optional[praw.Reddit]:
-    """Initialize PRAW client from environment variables."""
+def get_reddit_bearer_token() -> str:
+    """Obtain a Reddit API OAuth2 bearer token (server-side app)."""
     client_id = os.environ.get("REDDIT_CLIENT_ID")
     client_secret = os.environ.get("REDDIT_CLIENT_SECRET")
     user_agent = os.environ.get("REDDIT_USER_AGENT", "stockwatch:v0.1.0")
@@ -55,78 +61,138 @@ def get_reddit_client() -> Optional[praw.Reddit]:
             "Get them from https://www.reddit.com/prefs/apps"
         )
 
-    return praw.Reddit(
-        client_id=client_id,
-        client_secret=client_secret,
-        user_agent=user_agent,
+    # Reddit OAuth2: https://www.reddit.com/api/v1/access_token
+    # Server-side: grant_type=client_credentials
+    creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    data = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode()
+    req = urllib.request.Request(
+        "https://www.reddit.com/api/v1/access_token",
+        data=data,
+        headers={
+            "Authorization": f"Basic {creds}",
+            "User-Agent": user_agent,
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
     )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            token = body.get("access_token")
+            if not token:
+                raise RuntimeError(f"No access_token in response: {body}")
+            return token
+    except Exception as e:
+        raise RuntimeError(f"Failed to get Reddit bearer token: {e}")
+
+
+def search_reddit_posts(
+    bearer_token: str,
+    ticker: str,
+    subreddits: list[str] | None = None,
+    window_hours: int = 24,
+    seen_ids: set[str] | None = None,
+) -> tuple[list[dict], list[str]]:
+    """
+    Search Reddit via API v2 for a ticker in the given subreddits.
+    Returns (posts, new_ids).
+    """
+    if subreddits is None:
+        subreddits = DEFAULT_SUBREDDITS
+
+    user_agent = os.environ.get("REDDIT_USER_AGENT", "stockwatch:v0.1.0")
+    cutoff = datetime.utcnow() - timedelta(hours=window_hours)
+    all_posts: list[dict] = []
+    new_ids: list[str] = []
+
+    for sub_name in subreddits:
+        # Search via Reddit API v2: /r/{sub}/search
+        # https://www.reddit.com/dev/api#GET_search
+        params = {
+            "q": ticker,
+            "sort": "new",
+            "t": "day",
+            "limit": "50",
+            "type": "link",
+        }
+        url = f"https://oauth.reddit.com/r/{sub_name}/search?{urllib.parse.urlencode(params)}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {bearer_token}",
+                "User-Agent": user_agent,
+            },
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+                children = body.get("data", {}).get("children", [])
+                for child in children:
+                    post = child.get("data", {})
+                    post_id = post.get("id", "")
+                    created = datetime.utcfromtimestamp(post.get("created_utc", 0))
+
+                    # Skip old / already-seen
+                    if created < cutoff:
+                        continue
+                    if seen_ids is not None and post_id in seen_ids:
+                        continue
+
+                    if seen_ids is not None:
+                        seen_ids.add(post_id)
+                        new_ids.append(post_id)
+
+                    all_posts.append(post)
+        except Exception as e:
+            import logging
+            logging.warning(f"Reddit search failed for r/{sub_name}: {e}")
+
+    return all_posts, new_ids
 
 
 def fetch_reddit_sentiment(
-    reddit: praw.Reddit,
     ticker: str,
     subreddits: list[str] | None = None,
     window_hours: int = 24,
 ) -> SentimentResult:
     """Fetch Reddit sentiment for a ticker over the last `window_hours`."""
-    if subreddits is None:
-        subreddits = ["wallstreetbets", "stocks", "investing", "StockMarket"]
-
     result = SentimentResult(ticker=ticker)
-    now = datetime.utcnow()
-    cutoff = now - timedelta(hours=window_hours)
-
-    # Load seen post IDs to avoid re-processing
     seen_ids = _load_seen_ids()
     new_ids: list[str] = []
 
     try:
-        all_posts = []
-        for sub_name in subreddits:
-            sub = reddit.subreddit(sub_name)
-            # Search for the ticker in post titles
-            for submission in sub.search(
-                ticker, time_filter="day", sort="new", limit=50
-            ):
-                created = datetime.utcfromtimestamp(submission.created_utc)
-                if created < cutoff:
-                    continue
-                # Skip already-seen posts
-                if submission.id in seen_ids:
-                    continue
-                seen_ids.add(submission.id)
-                new_ids.append(submission.id)
-                all_posts.append(submission)
-                result.reddit_mentions += 1
+        # Get bearer token
+        token = get_reddit_bearer_token()
 
-        if not all_posts:
+        # Search posts
+        posts, new_ids = search_reddit_posts(
+            token, ticker, subreddits, window_hours, seen_ids
+        )
+        result.reddit_posts_last_day = len(posts)
+        result.reddit_mentions = len(posts)
+
+        if not posts:
             return result
 
-        # Compute simple sentiment proxy: upvote ratio
-        upvote_ratios = [p.upvote_ratio for p in all_posts if p.upvote_ratio]
-        if upvote_ratios:
-            result.reddit_score = round(
-                sum(upvote_ratios) / len(upvote_ratios), 3
-            )
+        # Compute simple sentiment: avg upvote ratio
+        ratios = [p.get("upvote_ratio", 0) for p in posts if p.get("upvote_ratio")]
+        if ratios:
+            result.reddit_score = round(sum(ratios) / len(ratios), 3)
 
-        result.reddit_posts_last_day = len(all_posts)
-
-        # Persist seen IDs for next run
-        if new_ids:
-            _save_seen_ids(seen_ids)
-
-        # Grab the top-scoring post's top comment for context
-        top_post = max(all_posts, key=lambda p: p.score)
-        if top_post.num_comments > 0:
-            top_post.comments.replace_more(limit=0)
-            comments = list(top_post.comments)[:3]
-            if comments:
-                result.reddit_top_comment = (
-                    comments[0].body[:300] if comments[0].body else None
-                )
+        # Top post's top comment
+        if posts:
+            top = max(posts, key=lambda p: p.get("score", 0))
+            top_id = top.get("id", "")
+            result.reddit_top_comment = f"Post: {top.get('title', '')[:80]}..."
 
     except Exception as e:
         result.error = str(e)
+        return result
+
+    # Persist seen IDs
+    if new_ids:
+        _save_seen_ids(seen_ids)
 
     return result
 
@@ -140,11 +206,6 @@ def summarize_with_llm(
     model: str = "deepseek/deepseek-v4-flash",
 ) -> str:
     """Use an LLM via OpenRouter to summarize Reddit sentiment."""
-    import json
-    import urllib.request
-    import urllib.error
-
-    # Build the prompt
     price_s = f"${price:.2f}" if price else "N/A"
     change_s = f"{change_pct:+.2f}%" if change_pct is not None else "N/A"
 
