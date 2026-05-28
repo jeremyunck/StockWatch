@@ -2,10 +2,34 @@
 
 import praw
 import os
+import json
 import time
 from datetime import datetime, timedelta
 from typing import Optional
 from dataclasses import dataclass, field
+from pathlib import Path
+
+# State file for tracking seen Reddit post IDs
+STATE_DIR = Path.home() / ".local" / "share" / "stockwatch"
+STATE_FILE = STATE_DIR / "reddit-seen-posts.json"
+
+
+def _load_seen_ids() -> set[str]:
+    """Load previously seen Reddit post IDs from state file."""
+    if not STATE_FILE.exists():
+        return set()
+    try:
+        return set(json.loads(STATE_FILE.read_text()))
+    except Exception:
+        return set()
+
+
+def _save_seen_ids(seen: set[str]) -> None:
+    """Save seen Reddit post IDs to state file."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    # Keep only last 5000 IDs to avoid unbounded growth
+    ids = list(seen)[-5000:]
+    STATE_FILE.write_text(json.dumps(ids))
 
 
 @dataclass
@@ -52,6 +76,10 @@ def fetch_reddit_sentiment(
     now = datetime.utcnow()
     cutoff = now - timedelta(hours=window_hours)
 
+    # Load seen post IDs to avoid re-processing
+    seen_ids = _load_seen_ids()
+    new_ids: list[str] = []
+
     try:
         all_posts = []
         for sub_name in subreddits:
@@ -63,6 +91,11 @@ def fetch_reddit_sentiment(
                 created = datetime.utcfromtimestamp(submission.created_utc)
                 if created < cutoff:
                     continue
+                # Skip already-seen posts
+                if submission.id in seen_ids:
+                    continue
+                seen_ids.add(submission.id)
+                new_ids.append(submission.id)
                 all_posts.append(submission)
                 result.reddit_mentions += 1
 
@@ -77,6 +110,10 @@ def fetch_reddit_sentiment(
             )
 
         result.reddit_posts_last_day = len(all_posts)
+
+        # Persist seen IDs for next run
+        if new_ids:
+            _save_seen_ids(seen_ids)
 
         # Grab the top-scoring post's top comment for context
         top_post = max(all_posts, key=lambda p: p.score)

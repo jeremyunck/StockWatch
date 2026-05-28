@@ -104,6 +104,11 @@ def main():
         type=str,
         help="Comma-separated list of RSS feed URLs (overrides defaults)",
     )
+    parser.add_argument(
+        "--clear-state",
+        action="store_true",
+        help="Clear seen Reddit post IDs (force re-fetch)",
+    )
 
     args = parser.parse_args()
 
@@ -114,6 +119,13 @@ def main():
         return
 
     quotes = get_quotes(tickers)
+
+    if args.clear_state:
+        import os
+        state_file = os.path.join(os.environ.get('HOME', ''), '.local', 'share', 'stockwatch', 'reddit-seen-posts.json')
+        if os.path.exists(state_file):
+            os.remove(state_file)
+            print('Cleared Reddit seen posts state.', file=sys.stderr)
 
     if args.news:
         print("Fetching RSS finance news...", file=sys.stderr)
