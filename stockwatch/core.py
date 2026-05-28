@@ -107,7 +107,9 @@ def compute_indicators(ticker_obj) -> TechnicalIndicators:
             indicators.volume_avg_20 = round(volume.rolling(20).mean().iloc[-1], 0)
 
     except Exception as e:
-        pass  # Partial indicators still useful
+        # Log the error for debugging, but still return partial indicators
+        import logging
+        logging.warning(f"Failed to compute indicators: {e}")
 
     return indicators
 
@@ -163,8 +165,11 @@ def get_quote(ticker: str) -> StockQuote:
 
 
 def get_quotes(tickers: list[str]) -> list[StockQuote]:
-    """Fetch quotes for multiple tickers."""
-    return [get_quote(t.strip().upper()) for t in tickers if t.strip()]
+    """Fetch quotes for multiple tickers in parallel."""
+    import concurrent.futures
+    tickers = [t.strip().upper() for t in tickers if t.strip()]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(tickers), 5)) as executor:
+        return list(executor.map(get_quote, tickers))
 
 
 def format_table(quotes: list[StockQuote]) -> str:
