@@ -1,0 +1,11 @@
+watchlist:
+  - {ticker: AMD,  name: "Advanced Micro Devices"}
+  - {ticker: META, name: "Meta Platforms"}
+  - {ticker: VST,  name: "Vistra"}
+  - {ticker: COHR, name: "Coherent"}
+
+settings:
+  # Sleep between tickers (seconds) to avoid Yahoo/Finnhub throttling
+  inter_ticker_sleep_sec: 2
+  # Timezone for bar_date and market-hours gating
+  market_timezone: America/New_York

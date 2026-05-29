@@ -1,0 +1,16 @@
+[Unit]
+Description=Run stock buy-signal collector every 30 minutes during market hours
+
+[Timer]
+# Fire at :00 and :30 of every hour, 09:00–17:00 ET Mon–Fri
+# systemd timers use the system clock; if the Pi runs UTC, these fire
+# at UTC equivalents.  Adjust OnCalendar or add a market-hours guard
+# in collect.py if you need strict ET enforcement.
+OnCalendar=Mon..Fri *-*-* 09..16:00,30:00
+# Prevent overlapping runs if a previous instance is still running
+# (combine with Type=oneshot in the service unit above).
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

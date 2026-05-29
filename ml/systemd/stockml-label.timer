@@ -1,0 +1,12 @@
+[Unit]
+Description=Run stock buy-signal label resolver daily at 18:00 ET (23:00 UTC)
+
+[Timer]
+# 18:00 ET = 23:00 UTC (adjust for DST: 22:00 UTC in summer)
+# Use 23:00 UTC year-round for a safe post-close buffer.
+OnCalendar=Mon..Fri *-*-* 23:00:00 UTC
+AccuracySec=60s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

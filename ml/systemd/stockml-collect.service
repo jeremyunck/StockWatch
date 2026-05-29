@@ -1,0 +1,21 @@
+[Unit]
+Description=Stock buy-signal collector (price_history + snapshots)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Adjust User and paths to match your Pi setup
+User=pi
+WorkingDirectory=/home/pi/StockWatch/ml
+ExecStart=/home/pi/StockWatch/.venv/bin/python collect.py \
+    --db /home/pi/StockWatch/ml/state.db \
+    --config /home/pi/StockWatch/ml/config.yaml
+EnvironmentFile=/home/pi/StockWatch/ml/.env
+
+# Log to journald; view with: journalctl -u stockml-collect
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
