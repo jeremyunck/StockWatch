@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Install:
+    cp ~/stockbot/launchd/com.user.stockbot.plist ~/Library/LaunchAgents/
+    # Edit the two /Users/YOU paths below to match your username
+    launchctl load ~/Library/LaunchAgents/com.user.stockbot.plist
+    launchctl start com.user.stockbot
+
+  Unload to edit:
+    launchctl unload ~/Library/LaunchAgents/com.user.stockbot.plist
+
+  Check status:
+    launchctl list | grep stockbot
+
+  Note: StartInterval fires every 30 min while the Mac is awake.
+  If the Mac is asleep, runs are deferred until wake.
+  The market_hours_only gate in config.yaml means off-hours wakes exit cheaply.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.user.stockbot</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/stockbot/.venv/bin/python</string>
+    <string>/Users/YOU/stockbot/main.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU/stockbot</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- The .env file is loaded by python-dotenv at runtime, so secrets stay out of here. -->
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- Every 30 minutes (1800 seconds) while the Mac is awake -->
+  <key>StartInterval</key>
+  <integer>1800</integer>
+
+  <!-- Alternatively, use StartCalendarInterval for exact wall-clock times:
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Minute</key><integer>30</integer></dict>
+  </array>
+  -->
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/stockbot/logs/out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/stockbot/logs/err.log</string>
+
+  <!-- Run once immediately when loaded -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Restart if it crashes (not normally needed for a one-shot script) -->
+  <key>KeepAlive</key>
+  <false/>
+</dict>
+</plist>
