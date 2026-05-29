@@ -1,11 +1,11 @@
-"""Claude LLM read with prompt caching and new-signal gate."""
+"""OpenRouter LLM read and new-signal gate."""
 
 import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional
 
-import anthropic
+import openai
 
 logger = logging.getLogger(__name__)
 
@@ -21,16 +21,19 @@ Rules:
 - Never express certainty about future price direction. Use language like "suggests", "may", "historically associated with".
 - Be concise. Total response should be under 200 words."""
 
-_client: Optional[anthropic.Anthropic] = None
+_client: Optional[openai.OpenAI] = None
 
 
-def _get_client() -> anthropic.Anthropic:
+def _get_client() -> openai.OpenAI:
     global _client
     if _client is None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        api_key = os.environ.get("OPEN_ROUTER_API_KEY", "")
         if not api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY not set")
-        _client = anthropic.Anthropic(api_key=api_key)
+            raise RuntimeError("OPEN_ROUTER_API_KEY not set")
+        _client = openai.OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
     return _client
 
 
@@ -101,9 +104,9 @@ def get_llm_read(
     quote: dict,
     indicators: dict,
     news: list[dict],
-    model: str = "claude-haiku-4-5",
+    model: str = "deepseek/deepseek-chat-v4-flash",
 ) -> tuple[Optional[str], Optional[str]]:
-    """Call Claude with prompt caching; return (full_text, parsed_signal_label).
+    """Call OpenRouter with the given model; return (full_text, parsed_signal_label).
 
     Returns (None, None) on failure — caller should degrade gracefully.
     Parsed signal is one of: LEAN_BUY, HOLD, LEAN_SELL, or None.
@@ -112,21 +115,17 @@ def get_llm_read(
         client = _get_client()
         user_msg = _build_user_message(ticker, name, quote, indicators, news)
 
-        response = client.messages.create(
+        response = client.chat.completions.create(
             model=model,
             max_tokens=400,
             temperature=0.2,
-            system=[
-                {
-                    "type": "text",
-                    "text": _SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
             ],
-            messages=[{"role": "user", "content": user_msg}],
         )
 
-        text = response.content[0].text.strip()
+        text = response.choices[0].message.content.strip()
         logger.debug("LLM response for %s: %s", ticker, text[:120])
 
         signal = _parse_signal(text)
