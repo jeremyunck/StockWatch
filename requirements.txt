@@ -1,0 +1,10 @@
+finnhub-python>=2.4.20
+yfinance>=0.2.40
+pandas>=2.0.0
+pandas-ta>=0.3.14b
+feedparser>=6.0.11
+anthropic>=0.40.0
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+tenacity>=8.2.3
+requests>=2.31.0

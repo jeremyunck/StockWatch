@@ -1,0 +1,14 @@
+watchlist:
+  - {ticker: AMD,  name: "Advanced Micro Devices"}
+  - {ticker: META, name: "Meta Platforms"}
+  - {ticker: VST,  name: "Vistra"}
+  - {ticker: COHR, name: "Coherent"}
+
+settings:
+  indicators: [sma50, sma200, ema20, rsi14, macd, bbands, atr14, obv]
+  news_lookback_hours: 24
+  llm_model: claude-haiku-4-5
+  only_call_llm_on_new_signal: true
+  market_hours_only: true          # ET 09:30-16:00, weekdays
+  max_embeds_per_post: 10
+  inter_call_sleep_sec: 1.5
