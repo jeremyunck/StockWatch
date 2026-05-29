@@ -67,7 +67,7 @@ def process_ticker(ticker: str, name: str, cfg: dict) -> dict | None:
     """
     settings = cfg["settings"]
     lookback_hours = settings.get("news_lookback_hours", 24)
-    model = settings.get("llm_model", "claude-haiku-4-5")
+    model = settings.get("llm_model", "deepseek/deepseek-chat-v4-flash")
     only_new_signal = settings.get("only_call_llm_on_new_signal", True)
 
     # --- OHLC ---
