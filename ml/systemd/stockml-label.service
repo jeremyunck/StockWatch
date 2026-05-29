@@ -1,0 +1,17 @@
+[Unit]
+Description=Stock buy-signal label resolver (daily, after market close)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/StockWatch/ml
+ExecStart=/home/pi/StockWatch/.venv/bin/python label_job.py \
+    --db /home/pi/StockWatch/ml/state.db
+EnvironmentFile=/home/pi/StockWatch/ml/.env
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
