@@ -58,9 +58,15 @@ def get_or_refresh_ohlc(ticker: str, fetch_fn) -> Optional[pd.DataFrame]:
         if row and row[1] == today:
             logger.debug("OHLC cache hit for %s", ticker)
             records = json.loads(row[0])
-            df = pd.DataFrame(records)
-            df.index = pd.to_datetime(df.index)
-            return df
+            try:
+                df = pd.DataFrame(records)
+                # Handle corrupted index (e.g., "Open" string)
+                df = df[~df.index.astype(str).str.contains("Open|High|Low|Close|Volume")]
+                df.index = pd.to_datetime(df.index, errors="coerce")
+                df = df.dropna(subset=["index"] if df.index.name == "index" else None)
+                return df
+            except Exception as e:
+                logger.warning("OHLC cache corrupt for %s: %s — refreshing", ticker, e)
 
     logger.info("Fetching fresh OHLC for %s", ticker)
     df = fetch_fn(ticker)

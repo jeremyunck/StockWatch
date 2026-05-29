@@ -34,6 +34,11 @@ def get_ohlc(ticker: str, period: str = "1y", interval: str = "1d") -> pd.DataFr
     df = t.history(period=period, interval=interval, auto_adjust=True)
     if df is None or len(df) < 50:
         raise ValueError(f"Insufficient OHLC data for {ticker}: got {len(df) if df is not None else 0} rows")
+    # Flatten MultiIndex columns if present (yfinance sometimes returns tuples)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [c[0] for c in df.columns]
+    # Ensure column names are strings, not tuples
+    df.columns = [str(c) for c in df.columns]
     df.index = pd.to_datetime(df.index)
     return df[["Open", "High", "Low", "Close", "Volume"]].copy()
 

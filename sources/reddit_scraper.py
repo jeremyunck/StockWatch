@@ -1,89 +1,80 @@
-"""Reddit subreddit scraper using the public JSON endpoint (no API key required)."""
+"""Reddit scraper for StockWatch."""
 
-import hashlib
+import os
 import logging
+import urllib.request
+import urllib.parse
+import json
+import base64
+from datetime import datetime, timedelta, timezone
 from typing import Optional
-
-import requests
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = logging.getLogger(__name__)
 
-_BASE_URL = "https://www.reddit.com/r/{subreddit}/{sort}.json"
-_HEADERS = {"User-Agent": "StockWatch/1.0 (research bot)"}
-_VALID_SORTS = frozenset({"hot", "new", "top", "rising"})
+# Subreddits to scrape for Reddit sentiment
+DEFAULT_SUBREDDITS = ["Stocks_Picks", "TheRaceTo10Million", "smallstreetbets"]
 
 
-def _post_key(post_id: str, title: str) -> str:
-    return hashlib.sha256(f"{post_id}|{title}".encode()).hexdigest()[:16]
+def get_reddit_bearer_token() -> str:
+    """Obtain Reddit API OAuth2 bearer token (server-side app)."""
+    client_id = os.environ.get("REDDIT_CLIENT_ID")
+    client_secret = os.environ.get("REDDIT_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise RuntimeError("REDDIT_CLIENT_ID and READDIT_CLIENT_SECRET must be set")
+
+    creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    data = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode()
+    req = urllib.request.Request(
+        "https://www.reddit.com/api/v1/access_token",
+        data=data,
+        headers={
+            "Authorization": f"Basic {creds}",
+            "User-Agent": "stockwatch:v0.2.0",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        body = json.loads(resp.read().decode("utf-8"))
+        return body["access_token"]
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=15),
-    retry=retry_if_exception_type(requests.RequestException),
-    reraise=True,
-)
-def _fetch_json(url: str, params: dict) -> dict:
-    resp = requests.get(url, headers=_HEADERS, params=params, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
+def get_reddit_sentiment(ticker: str, subreddits: list[str] | None = None) -> dict:
+    """Fetch Reddit sentiment for a ticker across specified subreddits."""
+    if subreddits is None:
+        subreddits = DEFAULT_SUBREDDITS
 
+    token = get_reddit_bearer_token()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    all_posts = []
+    mentions = 0
 
-def get_posts(
-    subreddit: str,
-    sort: str = "hot",
-    limit: int = 25,
-    keyword_filter: Optional[list[str]] = None,
-) -> list[dict]:
-    """Fetch posts from a subreddit via the public JSON endpoint.
+    for sub in subreddits:
+        url = f"https://oauth.reddit.com/r/{sub}/search?{urllib.parse.urlencode({'q': ticker, 'sort': 'new', 't': 'day', 'limit': '50', 'type': 'link'})}"
+        req = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Bearer {token}", "User-Agent": "stockwatch:v0.2.0"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+                for child in body.get("data", {}).get("children", []):
+                    post = child.get("data", {})
+                    created = datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc)
+                    if created < cutoff:
+                        continue
+                    all_posts.append(post)
+                    mentions += 1
+        except Exception as e:
+            logger.warning(f"Reddit search failed for r/{sub}: {e}")
 
-    Args:
-        subreddit: Subreddit name without the r/ prefix.
-        sort: One of 'hot', 'new', 'top', 'rising'.
-        limit: Max posts to return (Reddit caps at 100).
-        keyword_filter: If provided, only return posts whose title or selftext
-                        contains at least one keyword (case-insensitive).
+    # Compute simple sentiment
+    ratios = [p.get("upvote_ratio", 0) for p in all_posts if p.get("upvote_ratio")]
+    avg_ratio = round(sum(ratios) / len(ratios), 3) if ratios else None
 
-    Returns list of dicts with keys: headline, url, datetime, source, summary, article_key.
-    Never raises — returns empty list on any failure.
-    """
-    if sort not in _VALID_SORTS:
-        sort = "hot"
-    url = _BASE_URL.format(subreddit=subreddit, sort=sort)
-
-    try:
-        data = _fetch_json(url, {"limit": min(limit, 100)})
-        children = data.get("data", {}).get("children", [])
-        posts = []
-        for child in children:
-            post = child.get("data", {})
-            title = (post.get("title") or "").strip()
-            post_id = post.get("id", "")
-            if not title or not post_id:
-                continue
-
-            selftext = (post.get("selftext") or "").strip()
-            permalink = post.get("permalink", "")
-            post_url = f"https://www.reddit.com{permalink}" if permalink else ""
-
-            if keyword_filter:
-                combined = f"{title} {selftext}".lower()
-                if not any(kw.lower() in combined for kw in keyword_filter):
-                    continue
-
-            created_utc = post.get("created_utc")
-            pub_ts = int(created_utc) if created_utc else None
-
-            posts.append({
-                "headline": title,
-                "url": post_url,
-                "datetime": pub_ts,
-                "source": f"r/{subreddit}",
-                "summary": selftext[:500] if selftext else "",
-                "article_key": _post_key(post_id, title),
-            })
-        return posts
-    except Exception as exc:
-        logger.warning("Reddit fetch failed for r/%s: %s", subreddit, exc)
-        return []
+    return {
+        "mentions": mentions,
+        "avg_upvote_ratio": avg_ratio,
+        "posts": all_posts[:5],
+    }
