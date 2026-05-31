@@ -17,7 +17,6 @@ from indicators import compute_indicators, derive_signal
 from llm import get_llm_read, should_call_llm
 from sources.finnhub_src import get_company_news, get_quote
 from sources.news_rss import get_news as get_rss_news
-from sources.reddit_scraper import get_reddit_sentiment
 from sources.yf_fallback import get_ohlc, get_quote_fallback
 
 # ---------------------------------------------------------------------------
@@ -61,14 +60,29 @@ def _article_key(url: str, headline: str) -> str:
     return hashlib.sha256(f"{url}|{headline}".encode()).hexdigest()[:16]
 
 
+_SUMMARY_DISPLAY = {
+    "LEAN_BUY":  ("🟢", "LEAN BUY"),
+    "HOLD":      ("⚪", "HOLD"),
+    "LEAN_SELL": ("🔴", "LEAN SELL"),
+}
+
+
+def _summary_line(result: dict) -> str:
+    emoji, label = _SUMMARY_DISPLAY.get(result["label"], ("⚪", result["label"]))
+    change = result["change_pct"]
+    sign = "+" if change >= 0 else ""
+    return f"{emoji} `{result['ticker']:<6}` {sign}{change:.2f}%  →  {label}"
+
+
 def process_ticker(ticker: str, name: str, cfg: dict) -> dict | None:
     """Run a full data → indicators → LLM → embed cycle for one ticker.
 
-    Returns the built embed dict, or None if a fatal error occurred for this ticker.
+    Returns a result dict with keys: embed, ticker, change_pct, label.
+    Returns None if a fatal error occurred for this ticker.
     """
     settings = cfg["settings"]
     lookback_hours = settings.get("news_lookback_hours", 24)
-    model = settings.get("llm_model", "deepseek/deepseek-v4-flash")
+    model = settings.get("llm_model", "anthropic/claude-haiku-4.5")
     only_new_signal = settings.get("only_call_llm_on_new_signal", True)
 
     # --- OHLC ---
@@ -143,16 +157,6 @@ def process_ticker(ticker: str, name: str, cfg: dict) -> dict | None:
         ticker, price, label, len(new_articles), len(news),
     )
 
-    # Reddit sentiment
-    reddit_cfg = cfg.get('reddit', {})
-    subreddits = reddit_cfg.get('subreddits', ['Stocks_Picks', 'TheRaceTo10Million', 'smallstreetbets'])
-    reddit_data = {}
-    try:
-        reddit_data = get_reddit_sentiment(ticker, subreddits)
-        logger.info('%s: Reddit mentions=%d avg_upvote_ratio=%s', ticker, reddit_data.get('mentions', 0), reddit_data.get('avg_upvote_ratio', 'N/A'))
-    except Exception as exc:
-        logger.warning('Reddit sentiment failed for %s: %s', ticker, exc)
-
     # --- LLM ---
     last_signal = store.get_last_signal(ticker)
     llm_text: str | None = None
@@ -193,7 +197,12 @@ def process_ticker(ticker: str, name: str, cfg: dict) -> dict | None:
             article.get("datetime"),
         )
 
-    return embed
+    return {
+        "embed": embed,
+        "ticker": ticker,
+        "change_pct": quote["change_pct"],
+        "label": label,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -233,28 +242,20 @@ def main() -> None:
             time.sleep(inter_sleep)
 
         try:
-            embed = process_ticker(ticker, name, cfg)
-            if embed:
-                embeds.append(embed)
-                # Extract quick summary info
-                ticker_name = embed.get('fields', [{}])[0].get('value', '???').replace('Ticker: ', '')
-                change = 'N/A'
-                for field in embed.get('fields', []):
-                    if 'Change' in field.get('name', ''):
-                        change = field.get('value', 'N/A')
-                        break
-                color = embed.get('color', 0)
-                label = 'HOLD' if color == 0x00b894 else 'BUY' if color == 0x00aeff else 'SELL' if color == 0xff0000 else 'UNKNOWN'
-                summary_lines.append(f'  {ticker_name}: {change} → {label}')
+            result = process_ticker(ticker, name, cfg)
+            if result:
+                embeds.append(result["embed"])
+                summary_lines.append(_summary_line(result))
         except Exception as exc:
             logger.error("Unexpected error processing %s: %s", ticker, exc)
 
-    # Prepend summary embed
+    # Prepend a deterministic overview embed
     if embeds:
+        now_et = datetime.now(tz=ET).strftime("%Y-%m-%d %H:%M ET")
         summary_embed = {
-            'title': '📊 StockWatch Summary',
-            'description': f"```\n**StockWatch Summary — {datetime.now(tz=ET).strftime('%Y-%m-%d %H:%M ET')}**\n" + "\n".join(summary_lines) + "\n```",
-            'color': 0x5865f2,
+            "title": "📊 StockWatch Summary",
+            "description": f"**{now_et}**\n" + "\n".join(summary_lines),
+            "color": 0x5865F2,
         }
         embeds.insert(0, summary_embed)
 

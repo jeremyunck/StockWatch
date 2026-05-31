@@ -7,7 +7,7 @@ watchlist:
 settings:
   indicators: [sma50, sma200, ema20, rsi14, macd, bbands, atr14, obv]
   news_lookback_hours: 24
-  llm_model: deepseek/deepseek-chat-v4-flash
+  llm_model: anthropic/claude-haiku-4.5
   only_call_llm_on_new_signal: true
   market_hours_only: false          # ET 09:30-16:00, weekdays
   max_embeds_per_post: 10

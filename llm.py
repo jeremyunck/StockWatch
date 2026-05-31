@@ -104,7 +104,7 @@ def get_llm_read(
     quote: dict,
     indicators: dict,
     news: list[dict],
-    model: str = "deepseek/deepseek-chat-v4-flash",
+    model: str = "anthropic/claude-haiku-4.5",
 ) -> tuple[Optional[str], Optional[str]]:
     """Call OpenRouter with the given model; return (full_text, parsed_signal_label).
 
