@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -15,10 +15,9 @@ import store
 from discord_out import build_embed, post_embeds
 from indicators import compute_indicators, derive_signal
 from llm import get_llm_read, should_call_llm
-from sources.finnhub_src import get_company_news, get_quote
 from sources.news_rss import get_news as get_rss_news
 from sources.reddit_scraper import get_reddit_sentiment
-from sources.yf_fallback import get_ohlc, get_quote_fallback
+from sources.yf_fallback import get_ohlc, get_quote
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -67,7 +66,6 @@ def process_ticker(ticker: str, name: str, cfg: dict) -> dict | None:
     Returns the built embed dict, or None if a fatal error occurred for this ticker.
     """
     settings = cfg["settings"]
-    lookback_hours = settings.get("news_lookback_hours", 24)
     model = settings.get("llm_model", "deepseek/deepseek-v4-flash")
     only_new_signal = settings.get("only_call_llm_on_new_signal", True)
 
@@ -79,16 +77,11 @@ def process_ticker(ticker: str, name: str, cfg: dict) -> dict | None:
         return None
 
     # --- Quote ---
-    quote = None
     try:
         quote = get_quote(ticker)
     except Exception as exc:
-        logger.warning("Finnhub quote failed for %s, trying yfinance: %s", ticker, exc)
-        try:
-            quote = get_quote_fallback(ticker)
-        except Exception as exc2:
-            logger.error("All quote sources failed for %s: %s", ticker, exc2)
-            return None
+        logger.error("Quote failed for %s: %s", ticker, exc)
+        return None
 
     price = quote["price"]
 
@@ -105,28 +98,11 @@ def process_ticker(ticker: str, name: str, cfg: dict) -> dict | None:
     news: list[dict] = []
     new_articles: list[dict] = []  # unseen only (for dedup + LLM gate)
 
-    # Finnhub news
-    try:
-        now = datetime.now(timezone.utc)
-        from datetime import timedelta
-        frm_dt = now - timedelta(hours=lookback_hours)
-        frm_str = frm_dt.strftime("%Y-%m-%d")
-        to_str = now.strftime("%Y-%m-%d")
-        finnhub_news = get_company_news(ticker, frm_str, to_str)
-        for article in finnhub_news:
-            key = _article_key(article["url"], article["headline"])
-            article["article_key"] = key
-            news.append(article)
-    except Exception as exc:
-        logger.warning("Finnhub news failed for %s: %s", ticker, exc)
-
-    # Yahoo RSS news (supplemental)
+    # Yahoo RSS news
     try:
         rss_news = get_rss_news(ticker)
-        existing_urls = {a["url"] for a in news}
         for article in rss_news:
-            if article["url"] not in existing_urls:
-                news.append(article)
+            news.append(article)
     except Exception as exc:
         logger.warning("RSS news failed for %s: %s", ticker, exc)
 

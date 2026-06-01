@@ -29,7 +29,6 @@ pip install TA-Lib   # optional; requires brew install ta-lib above
 
 | Service | Where to get key |
 |---------|-----------------|
-| Finnhub | [finnhub.io](https://finnhub.io) → free tier |
 | Anthropic | [console.anthropic.com](https://console.anthropic.com) |
 | Discord webhook | Channel Settings → Integrations → Webhooks → New Webhook |
 
@@ -88,8 +87,7 @@ config.yaml          watchlist + settings
 .env                 secrets (gitignored)
 main.py              orchestrator
 sources/
-  finnhub_src.py     real-time quotes + company news (Finnhub)
-  yf_fallback.py     OHLC history + fallback quote (yfinance)
+  yf_fallback.py     OHLC history + real-time quote (yfinance)
   news_rss.py        Yahoo Finance per-ticker RSS
 indicators.py        pandas-ta computations + derive_signal()
 llm.py               Claude Haiku call with prompt caching
@@ -103,7 +101,7 @@ launchd/             macOS LaunchAgent plist
 ## Cost estimate (personal scale)
 
 - **LLM:** Claude Haiku 4.5 at ~$1/$5 per Mtok; with the new-signal gate + prompt caching, typically **a few dollars/month**.
-- **Finnhub:** free tier is 60 req/min — this script uses a tiny fraction.
+- **yfinance / Yahoo RSS:** free, no API key required.
 - **Discord:** webhooks allow 5 req / 2s; batching ≤10 embeds/POST keeps you clear.
 
 ---

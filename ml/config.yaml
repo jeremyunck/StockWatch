@@ -5,7 +5,7 @@ watchlist:
   - {ticker: COHR, name: "Coherent"}
 
 settings:
-  # Sleep between tickers (seconds) to avoid Yahoo/Finnhub throttling
+  # Sleep between tickers (seconds) to avoid Yahoo Finance throttling
   inter_ticker_sleep_sec: 2
   # Timezone for bar_date and market-hours gating
   market_timezone: America/New_York

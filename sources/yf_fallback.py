@@ -1,4 +1,4 @@
-"""yfinance fallback: OHLC history and backup quote."""
+"""yfinance data source: OHLC history and real-time quote."""
 
 import logging
 import random
@@ -43,8 +43,8 @@ def get_ohlc(ticker: str, period: str = "1y", interval: str = "1d") -> pd.DataFr
     return df[["Open", "High", "Low", "Close", "Volume"]].copy()
 
 
-def get_quote_fallback(ticker: str) -> dict:
-    """Pull a snapshot quote from yfinance (used only when Finnhub quote fails)."""
+def get_quote(ticker: str) -> dict:
+    """Pull a snapshot quote from yfinance."""
     try:
         time.sleep(random.uniform(1.0, 2.0))
         t = yf.Ticker(ticker)
