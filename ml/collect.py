@@ -10,10 +10,8 @@ Two modes:
            snapshots row per ticker with raw indicator values computed via
            pandas-ta. Intended to run every 30 min during market hours.
 
-Data sources (in priority order):
-  1. yfinance  — free, no key, ARM-friendly. Primary for daily history.
-  2. Finnhub   — free key (FINNHUB_API_KEY in .env), 60 req/min candle endpoint.
-                 Used as fallback when yfinance fails.
+Data source:
+  yfinance — free, no key, ARM-friendly. Used for all daily history.
 
 Indicator library: pandas-ta (pure Python, no TA-Lib C dependency — installs
 cleanly on ARM/aarch64).
@@ -152,55 +150,11 @@ def _yf_download(ticker: str, period: str, interval: str = "1d") -> pd.DataFrame
     return df
 
 
-@retry(
-    retry=retry_if_exception_type(Exception),
-    wait=wait_exponential(multiplier=1, min=2, max=30),
-    stop=stop_after_attempt(4),
-    reraise=True,
-)
-def _finnhub_candles(ticker: str, from_ts: int, to_ts: int) -> pd.DataFrame:
-    import os
-    import finnhub
-    key = os.environ.get("FINNHUB_API_KEY", "")
-    if not key:
-        raise EnvironmentError("FINNHUB_API_KEY not set")
-    client = finnhub.Client(api_key=key)
-    res = client.stock_candles(ticker, "D", from_ts, to_ts)
-    if res.get("s") != "ok" or not res.get("t"):
-        raise ValueError(f"Finnhub returned no data for {ticker}: {res.get('s')}")
-    df = pd.DataFrame({
-        "Open":   res["o"],
-        "High":   res["h"],
-        "Low":    res["l"],
-        "Close":  res["c"],
-        "Volume": res["v"],
-    }, index=pd.to_datetime(res["t"], unit="s", utc=True).tz_convert(NY_TZ).normalize())
-    df.index = df.index.tz_localize(None)
-    return df
-
-
 def fetch_history(ticker: str, period: str = "1y") -> pd.DataFrame:
-    """Fetch daily OHLCV; yfinance first, Finnhub as fallback."""
-    try:
-        df = _yf_download(ticker, period=period)
-        log.info("%s: yfinance returned %d bars", ticker, len(df))
-        return df
-    except Exception as yf_err:
-        log.warning("%s: yfinance failed (%s); trying Finnhub", ticker, yf_err)
-
-    import calendar
-    now = int(time.time())
-    days = 365 if period == "1y" else 30
-    from_ts = now - days * 86400
-    try:
-        df = _finnhub_candles(ticker, from_ts, now)
-        log.info("%s: Finnhub returned %d bars", ticker, len(df))
-        return df
-    except Exception as fh_err:
-        raise RuntimeError(
-            f"{ticker}: both yfinance and Finnhub failed. "
-            f"yfinance: {yf_err}; Finnhub: {fh_err}"
-        ) from fh_err
+    """Fetch daily OHLCV via yfinance."""
+    df = _yf_download(ticker, period=period)
+    log.info("%s: yfinance returned %d bars", ticker, len(df))
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -285,23 +239,15 @@ def compute_indicators(df: pd.DataFrame) -> dict:
 # ---------------------------------------------------------------------------
 
 def news_count_24h(ticker: str) -> int:
-    """Count distinct headlines for ticker in the last 24 hours via Finnhub."""
-    import os
-    key = os.environ.get("FINNHUB_API_KEY", "")
-    if not key:
-        return 0
+    """Count distinct news headlines for ticker in the last 24 hours via yfinance."""
     try:
-        import finnhub
+        import yfinance as yf
         from datetime import timedelta
-        client = finnhub.Client(api_key=key)
-        now = datetime.now(timezone.utc)
-        yesterday = now - timedelta(hours=24)
-        news = client.company_news(
-            ticker,
-            _from=yesterday.strftime("%Y-%m-%d"),
-            to=now.strftime("%Y-%m-%d"),
-        )
-        return len({n["headline"] for n in news}) if news else 0
+        t = yf.Ticker(ticker)
+        news = t.news or []
+        cutoff = int((datetime.now(timezone.utc) - timedelta(hours=24)).timestamp())
+        recent = [n for n in news if n.get("providerPublishTime", 0) >= cutoff]
+        return len({n.get("title", "") for n in recent if n.get("title")})
     except Exception as exc:
         log.debug("%s: news_count_24h failed: %s", ticker, exc)
         return 0

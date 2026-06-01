@@ -19,7 +19,6 @@ StockWatch polling system — they share no code and use their own database file
 ```bash
 cd StockWatch/ml
 pip install -r requirements.txt
-cp .env.example .env           # add your FINNHUB_API_KEY if you have one
 
 # 0. Smoke-test with synthetic data (no network required)
 python seed_test.py --db /tmp/test.db
@@ -68,7 +67,7 @@ Labels are *forward-looking* — they cannot be filled in until the window elaps
 | File | Purpose |
 |---|---|
 | `schema.sql` | SQLite schema (price_history, snapshots, labels) |
-| `collect.py` | Fetches OHLCV from yfinance/Finnhub, computes indicators via pandas-ta, writes snapshots |
+| `collect.py` | Fetches OHLCV from yfinance, computes indicators via pandas-ta, writes snapshots |
 | `label_job.py` | Resolves buy/no-buy labels retroactively once the 5-day window matures |
 | `train.py` | Builds features, walk-forward validates, trains XGBoost, saves versioned model |
 | `seed_test.py` | Synthetic smoke test — no network required, verifies hit/miss/pending logic |
@@ -115,9 +114,7 @@ journalctl -u stockml-collect -f
 
 ## Data Sources
 
-- **yfinance** (primary) — free, no API key, ARM-friendly.
-- **Finnhub** (fallback) — free key at finnhub.io; also used for optional news counts.
-  Set `FINNHUB_API_KEY` in `.env`.
+- **yfinance** — free, no API key, ARM-friendly. Used for all OHLCV history and news counts.
 
 All external calls retry with exponential backoff (tenacity). One ticker failing
 does not abort the run for remaining tickers.
